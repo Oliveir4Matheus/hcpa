@@ -1,0 +1,6 @@
+codigo,nome,bloco_predio,codigo_pai,total_colaboradores
+ROOT,HCPA,,,0
+ADM,Administração,Prédio Central,ROOT,120
+ENF-3A,Enfermaria 3A,Bloco A,ROOT,85
+ENF-3B,Enfermaria 3B,Bloco A,ROOT,72
+UTI-1,UTI Adulto 1,Bloco B,ROOT,48
