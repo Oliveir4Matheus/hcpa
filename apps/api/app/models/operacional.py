@@ -7,10 +7,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text, text
 from sqlalchemy.dialects.postgresql import ENUM, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.crypto import decrypt, encrypt
 from app.core.database import Base
 from app.models._base import (
     LembreteStatus,
@@ -21,7 +22,11 @@ from app.models._base import (
 
 
 class ColaboradorImport(Base):
-    """Tabela isolada — sem FK partilhada com `respostas`. Descartada pós-distribuição."""
+    """Tabela isolada — sem FK partilhada com `respostas`. Descartada pós-distribuição.
+
+    Campos PII (`nome`, `email`) são persistidos cifrados em colunas `*_enc`
+    via AES-256-GCM (ver `app.core.crypto`). Acesso transparente via properties.
+    """
 
     __tablename__ = "colaborador_import"
 
@@ -35,6 +40,24 @@ class ColaboradorImport(Base):
         nullable=False,
         server_default=StatusDistribuicao.pendente.value,
     )
+    nome_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    email_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
+    @property
+    def nome(self) -> str | None:
+        return decrypt(self.nome_enc) if self.nome_enc is not None else None
+
+    @nome.setter
+    def nome(self, value: str | None) -> None:
+        self.nome_enc = encrypt(value) if value is not None else None
+
+    @property
+    def email(self) -> str | None:
+        return decrypt(self.email_enc) if self.email_enc is not None else None
+
+    @email.setter
+    def email(self, value: str | None) -> None:
+        self.email_enc = encrypt(value) if value is not None else None
 
 
 class Credencial(Base):

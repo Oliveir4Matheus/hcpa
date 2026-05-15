@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://plataforma:plataforma_dev_change_me@postgres:5432/plataforma"
     redis_url: str = "redis://redis:6379/0"
 
+    # base64 de 32+ bytes; gerar com `openssl rand -base64 32`.
+    # Master key da plataforma — `app.core.crypto` deriva via HKDF as subchaves
+    # AES-GCM e HMAC-SHA256. Rotação suportada via version byte no ciphertext.
+    encryption_key: str = Field(default="")
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
