@@ -80,6 +80,13 @@ class CentroCusto(UUIDPKMixin, Base):
 
 
 class Questionario(UUIDPKMixin, Base):
+    """Granularidade condicional (k-anonimato em repouso):
+    para CCs com < K_ANONIMATO_MIN colaboradores, gravamos apenas `bloco_predio`
+    e zeramos `centro_custo_id`. Exatamente um dos dois é preenchido por linha.
+    Use `app.services.questionario_service.criar_questionario` em vez de
+    instanciar diretamente.
+    """
+
     __tablename__ = "questionarios"
 
     # descorrelacionado da identidade do respondente
@@ -89,9 +96,11 @@ class Questionario(UUIDPKMixin, Base):
         unique=True,
         server_default=text("gen_random_uuid()"),
     )
-    centro_custo_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("centros_custo.id", ondelete="RESTRICT"), nullable=False, index=True
+    centro_custo_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("centros_custo.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    # preenchido quando o CC é pequeno demais para granularidade fina
+    bloco_predio: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     data_inicio: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -105,6 +114,13 @@ class Questionario(UUIDPKMixin, Base):
     )
 
     respostas: Mapped[list["Resposta"]] = relationship(back_populates="questionario")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(centro_custo_id IS NULL) <> (bloco_predio IS NULL)",
+            name="ck_questionarios_granularidade_xor",
+        ),
+    )
 
 
 class Resposta(UUIDPKMixin, Base):
