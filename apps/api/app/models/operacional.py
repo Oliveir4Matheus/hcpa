@@ -7,8 +7,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, LargeBinary, String, Text, text
-from sqlalchemy.dialects.postgresql import ENUM, INET, JSONB, UUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, LargeBinary, String, Text, text
+from sqlalchemy.dialects.postgresql import CITEXT, ENUM, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.crypto import decrypt, encrypt
@@ -16,6 +16,7 @@ from app.core.database import Base
 from app.models._base import (
     LembreteStatus,
     LembreteTipo,
+    SessaoAdminEstado,
     StatusDistribuicao,
     UUIDPKMixin,
 )
@@ -114,17 +115,90 @@ class Auditoria(UUIDPKMixin, Base):
     meta: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
 
 
+class Operador(UUIDPKMixin, Base):
+    """Operador HMind do painel admin.
+
+    Senha em argon2id; TOTP secret e PII (nome, sobrenome) cifrados via
+    `app.core.crypto`. `ativo=false` bloqueia login sem apagar o registro
+    (preserva trilha de auditoria).
+    """
+
+    __tablename__ = "operadores"
+
+    email: Mapped[str] = mapped_column(CITEXT, unique=True, nullable=False)
+    senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    totp_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    nome_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    sobrenome_enc: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    ativo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    criado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    atualizado_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+        onupdate=text("now()"),
+    )
+
+    @property
+    def totp_secret(self) -> str | None:
+        return decrypt(self.totp_secret_enc) if self.totp_secret_enc is not None else None
+
+    @totp_secret.setter
+    def totp_secret(self, value: str | None) -> None:
+        self.totp_secret_enc = encrypt(value) if value is not None else None
+
+    @property
+    def nome(self) -> str | None:
+        return decrypt(self.nome_enc) if self.nome_enc is not None else None
+
+    @nome.setter
+    def nome(self, value: str | None) -> None:
+        self.nome_enc = encrypt(value) if value is not None else None
+
+    @property
+    def sobrenome(self) -> str | None:
+        return decrypt(self.sobrenome_enc) if self.sobrenome_enc is not None else None
+
+    @sobrenome.setter
+    def sobrenome(self, value: str | None) -> None:
+        self.sobrenome_enc = encrypt(value) if value is not None else None
+
+
 class SessaoAdmin(UUIDPKMixin, Base):
-    """Rate limiting e prevenção de duplicidade de sessão do operador."""
+    """Sessão de operador no painel admin.
+
+    Cookie contém o token opaco; banco guarda apenas SHA-256 (`token_hash`).
+    Estado `pendente_totp` cobre a janela entre verificar senha e validar TOTP.
+    """
 
     __tablename__ = "sessao_admin"
 
-    usuario: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
-    iniciada_em: Mapped[datetime] = mapped_column(
+    operador_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("operadores.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, unique=True
+    )
+    estado: Mapped[SessaoAdminEstado] = mapped_column(
+        ENUM(SessaoAdminEstado, name="sessao_admin_estado"),
+        nullable=False,
+        server_default=SessaoAdminEstado.ativa.value,
+    )
+    criada_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    expira_em: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revogada_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     ip_origem: Mapped[str | None] = mapped_column(INET, nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
-    expirada_em: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )

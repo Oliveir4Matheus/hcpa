@@ -37,3 +37,15 @@ class LembreteStatus(str, enum.Enum):
     pendente = "pendente"
     enviado = "enviado"
     falhou = "falhou"
+
+
+class SessaoAdminEstado(str, enum.Enum):
+    """Ciclo de vida de uma sessão administrativa.
+
+    `pendente_totp` é a fase entre login com senha e verificação TOTP.
+    Sessão nesse estado só pode chamar `/v1/auth/totp/verify`.
+    """
+
+    pendente_totp = "pendente_totp"
+    ativa = "ativa"
+    revogada = "revogada"
