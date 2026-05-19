@@ -1,22 +1,26 @@
 # Deploy via Coolify
 
 Runbook para subir a Plataforma HCPA (api + web + postgres + redis) em
-homolog e produção usando uma única instância Coolify auto-hospedada.
+homolog e produção usando o Coolify auto-hospedado em
+`coolify.dartenmind.com.br`.
 
-> Convenção: `<DOMINIO>` é o seu domínio raiz (ex.: `dartenmind.com`);
-> `<IP_VPS>` é o IP público do servidor Coolify.
+> Domínio raiz: `dartenmind.com.br`. `<IP_VPS>` é o IP público do
+> servidor que hospeda o Coolify (mesmo IP para onde
+> `coolify.dartenmind.com.br` já resolve).
 
 ---
 
 ## 0. Pré-requisitos
 
-- VPS com Coolify já instalado e acessível pelo navegador.
-- Domínio com permissão para criar entradas DNS no provedor.
-- Conta GitHub (recomendado privado) com permissão para criar repos.
+- Coolify ativo em `coolify.dartenmind.com.br` (já feito, server
+  `localhost` healthy).
+- Permissão para criar entradas DNS em `dartenmind.com.br`.
+- Conta GitHub para repo privado.
 - `openssl` local (para gerar segredos).
 
-Stack mínima recomendada para homolog + prod no mesmo servidor:
-**4 vCPU / 8 GB RAM / 80 GB SSD**.
+Stack do servidor: assumir mínimo 4 vCPU / 8 GB RAM para homolog + prod
++ os 23 apps já existentes do painel. Conferir `htop` / `df -h` no VPS
+antes de subir o primeiro deploy.
 
 ---
 
@@ -57,7 +61,7 @@ para `<IP_VPS>`):
 | `app.hcpa-stg`       | `app.hcpa`          |
 | `api.hcpa-stg`       | `api.hcpa`          |
 
-TTL 300 s (5 min). Aguardar propagação (`dig api.hcpa-stg.<DOMINIO> +short`).
+TTL 300 s (5 min). Aguardar propagação (`dig api.hcpa-stg.dartenmind.com.br +short`).
 
 ---
 
@@ -94,8 +98,8 @@ Em **hcpa → staging**:
 3. **Branch** → `staging`.
 4. **Docker Compose Location** → `docker-compose.prod.yml`.
 5. **Domains** (aba do recurso, depois do primeiro save):
-   - `api` (porta 8000) → `https://api.hcpa-stg.<DOMINIO>`
-   - `web` (porta 3000) → `https://app.hcpa-stg.<DOMINIO>`
+   - `api` (porta 8000) → `https://api.hcpa-stg.dartenmind.com.br`
+   - `web` (porta 3000) → `https://app.hcpa-stg.dartenmind.com.br`
 
    Coolify popula automaticamente `SERVICE_FQDN_API_8000` e
    `SERVICE_FQDN_WEB_3000` no compose com os valores acima.
@@ -123,18 +127,18 @@ Em **hcpa → staging**:
    ```bash
    # No painel Coolify, abrir o Terminal do serviço `api`:
    python -m scripts.create_operador \
-     --email admin@<DOMINIO> --senha '<senha forte>' --nome Admin
+     --email admin@dartenmind.com.br --senha '<senha forte>' --nome Admin
    ```
 
 9. **Smoke E2E**:
 
    ```bash
    # Em local:
-   curl -i https://api.hcpa-stg.<DOMINIO>/healthz
+   curl -i https://api.hcpa-stg.dartenmind.com.br/healthz
    curl -i -X POST -H "Content-Type: application/json" \
-     -d '{"email":"admin@<DOMINIO>","senha":"<senha>"}' \
-     https://api.hcpa-stg.<DOMINIO>/v1/auth/login
-   # Abrir https://app.hcpa-stg.<DOMINIO>/login no navegador.
+     -d '{"email":"admin@dartenmind.com.br","senha":"<senha>"}' \
+     https://api.hcpa-stg.dartenmind.com.br/v1/auth/login
+   # Abrir https://app.hcpa-stg.dartenmind.com.br/login no navegador.
    ```
 
 ---
@@ -144,7 +148,7 @@ Em **hcpa → staging**:
 Repetir o passo 5 dentro de **hcpa → production**, com 3 diferenças:
 
 - **Branch**: `main`
-- **Domains**: `api.hcpa.<DOMINIO>` e `app.hcpa.<DOMINIO>`
+- **Domains**: `api.hcpa.dartenmind.com.br` e `app.hcpa.dartenmind.com.br`
 - **Env vars**:
   - `API_ENV=production`
   - `POSTGRES_PASSWORD`, `API_SECRET_KEY`, `ENCRYPTION_KEY` →
@@ -229,8 +233,8 @@ Coolify → Resource → Environment Variables → editar → **Redeploy**.
       sincronizados.
 - [ ] Source conectada no Coolify (GitHub App ou Deploy Key).
 - [ ] Resource `staging` deployado com saúde verde nos 4 serviços.
-- [ ] `https://api.hcpa-stg.<DOMINIO>/healthz` retorna 200.
-- [ ] `https://app.hcpa-stg.<DOMINIO>/login` carrega e aceita login.
+- [ ] `https://api.hcpa-stg.dartenmind.com.br/healthz` retorna 200.
+- [ ] `https://app.hcpa-stg.dartenmind.com.br/login` carrega e aceita login.
 - [ ] Operador admin criado via terminal do Coolify.
 - [ ] Submissão pública de questionário testada com token real.
 - [ ] Backups configurados (Postgres) com schedule diário.
