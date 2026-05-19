@@ -1,8 +1,13 @@
-"""Schemas do import de centros de custo — §8.2 da documentação técnica.
+"""Schemas do import e da listagem de centros de custo.
 
-O Operador envia a lista vinda do Salesforce; o fluxo é em duas fases
-(preview e commit) e a hierarquia é referenciada por `codigo`, não por id.
+Import (§8.2 da doc técnica): o Operador envia a lista vinda do Salesforce;
+o fluxo é em duas fases (preview e commit) e a hierarquia é referenciada
+por `codigo`, não por id.
+
+Listagem: consumida pelo painel para popular o seletor de CC.
 """
+
+import uuid
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -43,3 +48,16 @@ class CentroCustoImportPreview(BaseModel):
 class CentroCustoImportResult(BaseModel):
     criados: int
     atualizados: int
+
+
+class CentroCustoOut(BaseModel):
+    id: uuid.UUID
+    codigo: str
+    nome: str
+    bloco_predio: str | None
+    total_colaboradores: int
+
+
+class CentroCustoListOut(BaseModel):
+    itens: list[CentroCustoOut]
+    total: int

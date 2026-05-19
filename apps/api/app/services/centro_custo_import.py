@@ -14,6 +14,8 @@ from app.schemas.centro_custo import (
     CentroCustoImportItem,
     CentroCustoImportPreview,
     CentroCustoImportResult,
+    CentroCustoListOut,
+    CentroCustoOut,
 )
 
 
@@ -133,3 +135,23 @@ async def aplicar_import(
 
     await db.commit()
     return CentroCustoImportResult(criados=criados, atualizados=atualizados)
+
+
+async def listar(db: AsyncSession) -> CentroCustoListOut:
+    """Lista todos os CCs ordenados por código (consumo do painel)."""
+    rows = (
+        (await db.execute(select(CentroCusto).order_by(CentroCusto.codigo)))
+        .scalars()
+        .all()
+    )
+    itens = [
+        CentroCustoOut(
+            id=cc.id,
+            codigo=cc.codigo,
+            nome=cc.nome,
+            bloco_predio=cc.bloco_predio,
+            total_colaboradores=cc.total_colaboradores,
+        )
+        for cc in rows
+    ]
+    return CentroCustoListOut(itens=itens, total=len(itens))

@@ -3,9 +3,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.core import CentroCusto
+from app.services import auth_service
 
 PREVIEW = "/v1/centros-custo/import/preview"
 COMMIT = "/v1/centros-custo/import/commit"
+LIST = "/v1/centros-custo"
+COOKIE = "hcpa_admin_sessao"
+SENHA = "senha-forte-1234"
+
+
+async def _login(client: AsyncClient, db: AsyncSession, *, email: str) -> dict[str, str]:
+    await auth_service.criar_operador(db, email=email, senha=SENHA)
+    r = await client.post("/v1/auth/login", json={"email": email, "senha": SENHA})
+    assert r.status_code == 200, r.text
+    return {COOKIE: r.cookies[COOKIE]}
 
 
 async def test_preview_classifica_novos(client: AsyncClient) -> None:
@@ -92,3 +103,49 @@ async def test_commit_atualiza_existente(
         await db_session.execute(select(CentroCusto).where(CentroCusto.codigo == "UPD-1"))
     ).scalar_one()
     assert cc.nome == "Nome novo"
+
+
+async def test_list_exige_auth(client: AsyncClient) -> None:
+    r = await client.get(LIST)
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "sessao_ausente"
+
+
+async def test_list_retorna_ccs_ordenados_por_codigo(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    cookies = await _login(client, db_session, email="list-op@example.com")
+    # prefixo único isola estes CCs do estado pré-existente do banco de dev
+    prefixo = "LST"
+    db_session.add_all(
+        [
+            CentroCusto(codigo=f"{prefixo}-ZETA", nome="Zeta", total_colaboradores=10),
+            CentroCusto(
+                codigo=f"{prefixo}-ALFA",
+                nome="Alfa",
+                total_colaboradores=2,
+                bloco_predio="Bloco 1",
+            ),
+            CentroCusto(codigo=f"{prefixo}-MED", nome="Med", total_colaboradores=5),
+        ]
+    )
+    await db_session.flush()
+
+    r = await client.get(LIST, cookies=cookies)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == len(body["itens"])
+
+    nossos = [it for it in body["itens"] if it["codigo"].startswith(prefixo)]
+    codigos = [it["codigo"] for it in nossos]
+    assert codigos == [f"{prefixo}-ALFA", f"{prefixo}-MED", f"{prefixo}-ZETA"]
+    alfa = nossos[0]
+    assert alfa["bloco_predio"] == "Bloco 1"
+    assert alfa["total_colaboradores"] == 2
+    assert set(alfa.keys()) == {
+        "id",
+        "codigo",
+        "nome",
+        "bloco_predio",
+        "total_colaboradores",
+    }
