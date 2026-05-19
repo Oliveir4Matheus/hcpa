@@ -1,0 +1,91 @@
+name: plataforma-hcpa
+
+# Compose de produção/homolog para deploy via Coolify.
+#
+# Diferenças relevantes para o docker-compose.yml de dev:
+# - Sem bind mounts do código (a imagem é imutável).
+# - Sem --reload no uvicorn; web roda o stage `runner` (Next standalone).
+# - postgres e redis ficam isolados na rede interna; só web e api ganham
+#   FQDN via Traefik do Coolify.
+# - Variáveis SERVICE_FQDN_* / SERVICE_URL_* são preenchidas pelo Coolify
+#   no momento do deploy a partir do que você configurar no painel.
+# - Migrations rodam no entrypoint do api (`alembic upgrade head &&
+#   uvicorn`). Idempotente.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      # SERVICE_FQDN_API_8000 ativa o roteamento Traefik no Coolify.
+      # Configurar o FQDN (ex.: api.hcpa-stg.dominio.com) no painel.
+      SERVICE_FQDN_API_8000: ${SERVICE_FQDN_API_8000}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      API_ENV: ${API_ENV:-production}
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-INFO}
+      API_SECRET_KEY: ${API_SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      API_CORS_ORIGINS: ${SERVICE_URL_WEB_3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Aplica migrations idempotentemente antes de subir o uvicorn.
+    command:
+      - sh
+      - -c
+      - |
+        alembic upgrade head &&
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: runner
+    restart: unless-stopped
+    environment:
+      # SERVICE_FQDN_WEB_3000: domínio público do painel; Coolify gera o Traefik label.
+      SERVICE_FQDN_WEB_3000: ${SERVICE_FQDN_WEB_3000}
+      # API_URL é usada SERVER-SIDE (rewrites do Next + RSC). Browser usa
+      # /api/* via proxy, então API e Web ficam na mesma origem.
+      API_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: ${SERVICE_URL_API_8000}
+      NODE_ENV: production
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
