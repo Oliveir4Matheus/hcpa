@@ -63,6 +63,9 @@ services:
       - .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # usado pelas rewrites server-side do Next (proxy /api/* → API).
+      # No browser, as chamadas vão para /api/* (mesma origem do web).
+      API_URL: ${API_URL:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:
