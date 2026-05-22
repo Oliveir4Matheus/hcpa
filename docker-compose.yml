@@ -63,6 +63,9 @@ services:
       - .env
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # usada em runtime por RSC/route handlers (ex.: painel-api-server.ts).
+      # Browser usa /api/* via rewrites com destino hardcoded em next.config.ts.
+      API_URL: ${API_URL:-http://api:8000}
     ports:
       - "3000:3000"
     depends_on:
