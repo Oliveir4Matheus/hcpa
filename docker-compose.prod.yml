@@ -81,9 +81,6 @@ services:
     environment:
       # SERVICE_FQDN_WEB_3000: domínio público do painel; Coolify gera o Traefik label.
       SERVICE_FQDN_WEB_3000: ${SERVICE_FQDN_WEB_3000}
-      # API_URL é usada SERVER-SIDE (rewrites do Next + RSC). Browser usa
-      # /api/* via proxy, então API e Web ficam na mesma origem.
-      API_URL: http://api:8000
       NEXT_PUBLIC_API_URL: ${SERVICE_URL_API_8000}
       NODE_ENV: production
     depends_on:
