@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.core import CentroCusto
+from app.models.operacional import Auditoria
 from app.services import auth_service
 
 PREVIEW = "/v1/centros-custo/import/preview"
@@ -19,24 +20,44 @@ async def _login(client: AsyncClient, db: AsyncSession, *, email: str) -> dict[s
     return {COOKIE: r.cookies[COOKIE]}
 
 
-async def test_preview_classifica_novos(client: AsyncClient) -> None:
+async def test_preview_exige_auth(client: AsyncClient) -> None:
+    payload = {"itens": [{"codigo": "X", "nome": "X"}]}
+    r = await client.post(PREVIEW, json=payload)
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "sessao_ausente"
+
+
+async def test_commit_exige_auth(client: AsyncClient) -> None:
+    payload = {"itens": [{"codigo": "X", "nome": "X"}]}
+    r = await client.post(COMMIT, json=payload)
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "sessao_ausente"
+
+
+async def test_preview_classifica_novos(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    cookies = await _login(client, db_session, email="prev1@example.com")
     payload = {
         "itens": [
             {"codigo": "PREDIO-A", "nome": "Prédio A"},
             {"codigo": "SETOR-A1", "nome": "Setor A1", "codigo_pai": "PREDIO-A"},
         ]
     }
-    resp = await client.post(PREVIEW, json=payload)
-    assert resp.status_code == 200
+    resp = await client.post(PREVIEW, json=payload, cookies=cookies)
+    assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["valido"] is True
     assert set(body["novos"]) == {"PREDIO-A", "SETOR-A1"}
     assert body["atualizados"] == []
 
 
-async def test_preview_detecta_codigo_pai_inexistente(client: AsyncClient) -> None:
+async def test_preview_detecta_codigo_pai_inexistente(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    cookies = await _login(client, db_session, email="prev2@example.com")
     payload = {"itens": [{"codigo": "ORFAO", "nome": "Órfão", "codigo_pai": "NAO-EXISTE"}]}
-    resp = await client.post(PREVIEW, json=payload)
+    resp = await client.post(PREVIEW, json=payload, cookies=cookies)
     assert resp.status_code == 200
     body = resp.json()
     assert body["valido"] is False
@@ -44,14 +65,17 @@ async def test_preview_detecta_codigo_pai_inexistente(client: AsyncClient) -> No
     assert "não existe" in body["erros"][0]["erro"]
 
 
-async def test_preview_detecta_ciclo(client: AsyncClient) -> None:
+async def test_preview_detecta_ciclo(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    cookies = await _login(client, db_session, email="prev3@example.com")
     payload = {
         "itens": [
             {"codigo": "A", "nome": "A", "codigo_pai": "B"},
             {"codigo": "B", "nome": "B", "codigo_pai": "A"},
         ]
     }
-    resp = await client.post(PREVIEW, json=payload)
+    resp = await client.post(PREVIEW, json=payload, cookies=cookies)
     body = resp.json()
     assert body["valido"] is False
     assert {e["codigo"] for e in body["erros"]} == {"A", "B"}
@@ -61,13 +85,14 @@ async def test_preview_detecta_ciclo(client: AsyncClient) -> None:
 async def test_commit_persiste_e_preserva_hierarquia(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
+    cookies = await _login(client, db_session, email="commit1@example.com")
     payload = {
         "itens": [
             {"codigo": "PREDIO-X", "nome": "Prédio X", "total_colaboradores": 50},
             {"codigo": "SETOR-X1", "nome": "Setor X1", "codigo_pai": "PREDIO-X"},
         ]
     }
-    resp = await client.post(COMMIT, json=payload)
+    resp = await client.post(COMMIT, json=payload, cookies=cookies)
     assert resp.status_code == 200
     assert resp.json() == {"criados": 2, "atualizados": 0}
 
@@ -82,9 +107,40 @@ async def test_commit_persiste_e_preserva_hierarquia(
     assert by_codigo["PREDIO-X"].total_colaboradores == 50
 
 
-async def test_commit_rejeita_payload_invalido(client: AsyncClient) -> None:
+async def test_commit_registra_auditoria(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    email = "audit-commit@example.com"
+    cookies = await _login(client, db_session, email=email)
+    payload = {"itens": [{"codigo": "AUDIT-1", "nome": "Auditado", "total_colaboradores": 7}]}
+    r = await client.post(COMMIT, json=payload, cookies=cookies)
+    assert r.status_code == 200
+
+    audit = (
+        (
+            await db_session.execute(
+                select(Auditoria).where(
+                    Auditoria.acao == "centros_custo_import_commit",
+                    Auditoria.usuario == email,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(audit) >= 1
+    entry = audit[-1]
+    assert entry.recurso == "centros_custo"
+    assert entry.meta is not None
+    assert entry.meta["criados"] >= 1
+
+
+async def test_commit_rejeita_payload_invalido(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    cookies = await _login(client, db_session, email="commit2@example.com")
     payload = {"itens": [{"codigo": "Y", "nome": "Y", "codigo_pai": "Y"}]}
-    resp = await client.post(COMMIT, json=payload)
+    resp = await client.post(COMMIT, json=payload, cookies=cookies)
     assert resp.status_code == 422
     assert resp.json()["detail"]["erros"][0]["codigo"] == "Y"
 
@@ -92,9 +148,12 @@ async def test_commit_rejeita_payload_invalido(client: AsyncClient) -> None:
 async def test_commit_atualiza_existente(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    await client.post(COMMIT, json={"itens": [{"codigo": "UPD-1", "nome": "Nome antigo"}]})
+    cookies = await _login(client, db_session, email="commit3@example.com")
+    await client.post(
+        COMMIT, json={"itens": [{"codigo": "UPD-1", "nome": "Nome antigo"}]}, cookies=cookies
+    )
     resp = await client.post(
-        COMMIT, json={"itens": [{"codigo": "UPD-1", "nome": "Nome novo"}]}
+        COMMIT, json={"itens": [{"codigo": "UPD-1", "nome": "Nome novo"}]}, cookies=cookies
     )
     assert resp.status_code == 200
     assert resp.json() == {"criados": 0, "atualizados": 1}

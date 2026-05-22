@@ -32,7 +32,9 @@ class ColaboradorImport(Base):
     __tablename__ = "colaborador_import"
 
     matricula: Mapped[str] = mapped_column(String(60), primary_key=True)
-    senha_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Nullable até o passo de distribuição — argon2id da senha aleatória
+    # gerada para esse colaborador (Sprint 2 #6 e #7).
+    senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     centro_custo_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("centros_custo.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -62,9 +64,20 @@ class ColaboradorImport(Base):
 
 
 class Credencial(Base):
+    """Credencial de respondente — único elo entre senha individual e CC.
+
+    `senha_hash` é argon2id (PK opaca). `senha_hmac` é HMAC-SHA256 determinístico
+    da mesma senha, usado para lookup O(1) no login do respondente — sem ele
+    teríamos que iterar todas as linhas verificando argon2id, inviável em escala.
+    Argon2id continua sendo a barreira primária; HMAC só ajuda a localizar a linha.
+    """
+
     __tablename__ = "credencial"
 
     senha_hash: Mapped[str] = mapped_column(String(255), primary_key=True)
+    senha_hmac: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, unique=True
+    )
     centro_custo_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("centros_custo.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -75,19 +88,22 @@ class Credencial(Base):
     token_sessao_temporario: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, unique=True
     )
+    expira_em: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Lembrete(UUIDPKMixin, Base):
-    """Engajamento — disparos em D+3, D+7, D+15, D+30."""
+    """Engajamento — disparos em D+3, D+7, D+15, D+30.
+
+    `matricula` é guardada como string sem FK: a tabela `colaborador_import` é
+    descartada após distribuição (Sprint 2 #9), e queremos preservar a trilha
+    de engajamento mesmo depois disso.
+    """
 
     __tablename__ = "lembretes"
 
-    # FK válida apenas durante a janela de distribuição (colaborador_import existe)
-    matricula: Mapped[str] = mapped_column(
-        ForeignKey("colaborador_import.matricula", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
+    matricula: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     tipo: Mapped[LembreteTipo] = mapped_column(
         ENUM(LembreteTipo, name="lembrete_tipo"), nullable=False
     )
@@ -139,11 +155,13 @@ class Operador(UUIDPKMixin, Base):
     criado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # `atualizado_em` é mantido por trigger BEFORE UPDATE (`set_atualizado_em`)
+    # criado na migration `2c2f4d9a7e10`. Não declaramos `onupdate` aqui porque
+    # isso é ignorado em updates via SQL bruto — o trigger é a fonte de verdade.
     atualizado_em: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
-        onupdate=text("now()"),
     )
 
     @property

@@ -19,6 +19,18 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class QuestionarioCriadoOut(BaseModel):
+    """Resposta da criação de questionário pelo respondente.
+
+    Retorna o `token_anonimo` — segredo descorrelacionado da identidade do
+    respondente que ele usa para submeter as respostas via endpoint público
+    `POST /v1/questionarios/{token}/respostas`.
+    """
+
+    questionario_id: uuid.UUID
+    token_anonimo: uuid.UUID
+
+
 class RespostaIn(BaseModel):
     item_id: uuid.UUID
     valor: int = Field(ge=0, le=4)

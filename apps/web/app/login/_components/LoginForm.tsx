@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { LoginError, postLogin } from "../_lib/auth-api";
+import { TotpForm } from "./TotpForm";
 
 type Estado =
   | { tipo: "idle" }
@@ -36,10 +37,23 @@ export function LoginForm() {
     }
   }
 
+  // Etapa TOTP: substitui o form de credenciais até o usuário cancelar.
+  if (estado.tipo === "totp_pendente") {
+    return (
+      <TotpForm
+        email={estado.email}
+        onCancelar={() => {
+          setSenha("");
+          setEstado({ tipo: "idle" });
+        }}
+      />
+    );
+  }
+
   const enviando = estado.tipo === "enviando";
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" aria-label="Login do operador">
       <div>
         <label htmlFor="email" className="block text-sm font-medium">
           E-mail

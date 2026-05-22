@@ -1,7 +1,14 @@
 import Link from "next/link";
+import { exigirOperador } from "../_lib/auth-server";
 import { UploadCentrosCusto } from "./_components/UploadCentrosCusto";
 
-export default function AdminPage() {
+export const metadata = {
+  title: "Admin · Plataforma HCPA",
+};
+
+export default async function AdminPage() {
+  await exigirOperador();
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <nav className="text-xs text-neutral-500">

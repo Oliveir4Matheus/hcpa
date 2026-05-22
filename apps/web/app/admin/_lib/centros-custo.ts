@@ -1,3 +1,15 @@
+/**
+ * Cliente browser-side do admin (import de centros de custo).
+ *
+ * Usa o proxy `/api/*` configurado no Next (next.config.ts) — fetches saem
+ * da mesma origem do HTML, então o cookie `hcpa_admin_sessao` (HttpOnly +
+ * SameSite=lax) chega à API sem CORS.
+ *
+ * A partir de Sprint 1 #2, os endpoints de import exigem operador
+ * autenticado. Em 401 lançamos `CentrosCustoError` com code estável
+ * `nao_autenticado` para que a UI possa redirecionar para /login.
+ */
+
 export type CentroCustoItem = {
   codigo: string;
   nome: string;
@@ -26,6 +38,16 @@ export type CommitResponse = {
   criados: number;
   atualizados: number;
 };
+
+export class CentrosCustoError extends Error {
+  constructor(
+    public readonly code: string,
+    mensagem: string,
+  ) {
+    super(mensagem);
+    this.name = "CentrosCustoError";
+  }
+}
 
 const COLUNAS_OBRIGATORIAS = [
   "codigo",
@@ -148,42 +170,59 @@ export function parseCsvCentrosCusto(texto: string): ParseResult {
   return { ok: true, itens };
 }
 
-function getApiBase(): string {
-  const url = process.env.NEXT_PUBLIC_API_URL;
-  return url && url.length > 0 ? url : "http://localhost:8000";
+async function lerErro(res: Response, fallbackMensagem: string): Promise<CentrosCustoError> {
+  if (res.status === 401) {
+    return new CentrosCustoError(
+      "nao_autenticado",
+      "Sessão expirada ou ausente.",
+    );
+  }
+  let code = "erro_desconhecido";
+  let mensagem = fallbackMensagem;
+  try {
+    const body = (await res.json()) as {
+      detail?:
+        | { code?: string; mensagem?: string; erros?: PreviewIssue[] }
+        | string;
+    };
+    if (typeof body.detail === "object" && body.detail !== null) {
+      if (body.detail.code) code = body.detail.code;
+      if (body.detail.mensagem) mensagem = body.detail.mensagem;
+      if (body.detail.erros && body.detail.erros.length > 0) {
+        code = "payload_invalido";
+        mensagem = body.detail.erros
+          .map((e) => `${e.codigo}: ${e.erro}`)
+          .join("; ");
+      }
+    }
+  } catch {
+    // resposta não-JSON, mantém defaults
+  }
+  return new CentrosCustoError(code, mensagem);
 }
 
 export async function postPreview(
   itens: CentroCustoItem[],
 ): Promise<PreviewResponse> {
-  const res = await fetch(`${getApiBase()}/v1/centros-custo/import/preview`, {
+  const res = await fetch("/api/v1/centros-custo/import/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ itens }),
   });
-  if (!res.ok) {
-    throw new Error(`Preview falhou (HTTP ${res.status}).`);
-  }
+  if (!res.ok) throw await lerErro(res, `Preview falhou (HTTP ${res.status}).`);
   return (await res.json()) as PreviewResponse;
 }
 
 export async function postCommit(
   itens: CentroCustoItem[],
 ): Promise<CommitResponse> {
-  const res = await fetch(`${getApiBase()}/v1/centros-custo/import/commit`, {
+  const res = await fetch("/api/v1/centros-custo/import/commit", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ itens }),
   });
-  if (!res.ok) {
-    let detalhe = "";
-    try {
-      const body = await res.json();
-      detalhe = JSON.stringify(body);
-    } catch {
-      detalhe = await res.text();
-    }
-    throw new Error(`Commit falhou (HTTP ${res.status}): ${detalhe}`);
-  }
+  if (!res.ok) throw await lerErro(res, `Commit falhou (HTTP ${res.status}).`);
   return (await res.json()) as CommitResponse;
 }

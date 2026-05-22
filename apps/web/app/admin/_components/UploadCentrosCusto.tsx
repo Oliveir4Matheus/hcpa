@@ -1,7 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
+  CentrosCustoError,
   parseCsvCentrosCusto,
   postCommit,
   postPreview,
@@ -36,7 +38,16 @@ type Estado =
   | { tipo: "commit-erro"; nomeArquivo: string; mensagem: string };
 
 export function UploadCentrosCusto() {
+  const router = useRouter();
   const [estado, setEstado] = useState<Estado>({ tipo: "idle" });
+
+  function tratarErroOuRedirecionar(err: unknown): string {
+    if (err instanceof CentrosCustoError && err.code === "nao_autenticado") {
+      router.push("/login");
+      return "Sessão expirada — redirecionando para login.";
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
 
   async function aoSelecionarArquivo(arquivo: File) {
     const texto = await arquivo.text();
@@ -65,7 +76,7 @@ export function UploadCentrosCusto() {
       setEstado({
         tipo: "preview-erro",
         nomeArquivo,
-        mensagem: err instanceof Error ? err.message : String(err),
+        mensagem: tratarErroOuRedirecionar(err),
       });
     }
   }
@@ -79,7 +90,7 @@ export function UploadCentrosCusto() {
       setEstado({
         tipo: "commit-erro",
         nomeArquivo,
-        mensagem: err instanceof Error ? err.message : String(err),
+        mensagem: tratarErroOuRedirecionar(err),
       });
     }
   }

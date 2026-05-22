@@ -2,12 +2,17 @@
 # Smoke test E2E do fluxo de import de centros de custo contra o stack rodando.
 # Diferente dos testes unitários (Vitest), este bate na API real e no banco real.
 # Roda a partir da raiz de `plataforma/`. Requer curl + jq + docker compose.
+#
+# A partir de Sprint 1 #2, os endpoints de import exigem operador autenticado.
+# O script cria um operador temporário, loga, e usa o cookie para as chamadas.
 
 set -euo pipefail
 
 API="${API_BASE:-http://localhost:8000}"
 PG_USER="${POSTGRES_USER:-plataforma}"
 PG_DB="${POSTGRES_DB:-plataforma}"
+EMAIL="smoke-upload@example.com"
+SENHA="senha-smoke-up-12345"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 dim()   { printf '\033[2m%s\033[0m\n' "$*"; }
@@ -15,6 +20,8 @@ ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail()  { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; FALHAS=$((FALHAS+1)); }
 
 FALHAS=0
+CJ=$(mktemp)
+trap 'rm -f "$CJ"' EXIT
 
 CSV_OK_JSON='{"itens":[
   {"codigo":"ROOT","nome":"HCPA","codigo_pai":null,"total_colaboradores":0},
@@ -28,31 +35,54 @@ CSV_BAD_JSON='{"itens":[
 
 bold "== Preparação =="
 docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" \
-  -c "TRUNCATE centros_custo CASCADE;" >/dev/null
+  -c "TRUNCATE centros_custo CASCADE; \
+      DELETE FROM sessao_admin WHERE operador_id IN (SELECT id FROM operadores WHERE email = '$EMAIL'); \
+      DELETE FROM operadores WHERE email = '$EMAIL';" >/dev/null
 ok "banco zerado"
 
-bold "== 1. Preview de payload válido =="
-PREVIEW_OK=$(curl -sS -X POST "$API/v1/centros-custo/import/preview" \
+bold "== 0. Bootstrap do operador + login =="
+docker compose exec -T api python -m scripts.create_operador \
+  --email "$EMAIL" --senha "$SENHA" --nome Smoke --sobrenome Upload >/dev/null \
+  && ok "operador criado" || fail "criar_operador falhou"
+
+HTTP=$(curl -sS -o /dev/null -c "$CJ" -w '%{http_code}' -X POST "$API/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}")
+[[ "$HTTP" == "200" ]] && ok "login HTTP 200" || fail "login HTTP $HTTP"
+
+bold "== 0b. Endpoints exigem auth (sem cookie ⇒ 401) =="
+HTTP=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -X POST "$API/v1/centros-custo/import/preview" \
+  -H 'Content-Type: application/json' -d "$CSV_OK_JSON")
+[[ "$HTTP" == "401" ]] && ok "preview sem cookie HTTP 401" || fail "esperava 401, veio $HTTP"
+
+HTTP=$(curl -sS -o /dev/null -w '%{http_code}' \
+  -X POST "$API/v1/centros-custo/import/commit" \
+  -H 'Content-Type: application/json' -d "$CSV_OK_JSON")
+[[ "$HTTP" == "401" ]] && ok "commit sem cookie HTTP 401" || fail "esperava 401, veio $HTTP"
+
+bold "== 1. Preview de payload válido (autenticado) =="
+PREVIEW_OK=$(curl -sS -b "$CJ" -X POST "$API/v1/centros-custo/import/preview" \
   -H 'Content-Type: application/json' -d "$CSV_OK_JSON")
 echo "$PREVIEW_OK" | jq -e '.valido == true' >/dev/null \
   && ok "preview.valido=true" || fail "preview.valido != true: $PREVIEW_OK"
 echo "$PREVIEW_OK" | jq -e '.novos | length == 3' >/dev/null \
   && ok "preview.novos.length=3" || fail "preview.novos errado: $PREVIEW_OK"
 
-bold "== 2. Commit do payload válido =="
-COMMIT_OK=$(curl -sS -X POST "$API/v1/centros-custo/import/commit" \
+bold "== 2. Commit do payload válido (autenticado) =="
+COMMIT_OK=$(curl -sS -b "$CJ" -X POST "$API/v1/centros-custo/import/commit" \
   -H 'Content-Type: application/json' -d "$CSV_OK_JSON")
 echo "$COMMIT_OK" | jq -e '.criados == 3 and .atualizados == 0' >/dev/null \
   && ok "commit.criados=3 atualizados=0" || fail "commit errado: $COMMIT_OK"
 
 bold "== 3. Idempotência (re-commit do mesmo payload) =="
-COMMIT_2=$(curl -sS -X POST "$API/v1/centros-custo/import/commit" \
+COMMIT_2=$(curl -sS -b "$CJ" -X POST "$API/v1/centros-custo/import/commit" \
   -H 'Content-Type: application/json' -d "$CSV_OK_JSON")
 echo "$COMMIT_2" | jq -e '.criados == 0 and .atualizados == 3' >/dev/null \
   && ok "re-commit.criados=0 atualizados=3" || fail "re-commit errado: $COMMIT_2"
 
 bold "== 4. Preview de payload inválido (codigo_pai inexistente) =="
-PREVIEW_BAD=$(curl -sS -X POST "$API/v1/centros-custo/import/preview" \
+PREVIEW_BAD=$(curl -sS -b "$CJ" -X POST "$API/v1/centros-custo/import/preview" \
   -H 'Content-Type: application/json' -d "$CSV_BAD_JSON")
 echo "$PREVIEW_BAD" | jq -e '.valido == false' >/dev/null \
   && ok "preview.valido=false" || fail "preview.valido != false: $PREVIEW_BAD"
@@ -60,7 +90,7 @@ echo "$PREVIEW_BAD" | jq -e '.erros[0].erro | test("NAO-EXISTE")' >/dev/null \
   && ok "erro cita 'NAO-EXISTE'" || fail "mensagem errada: $PREVIEW_BAD"
 
 bold "== 5. Commit rejeitado para payload inválido (HTTP 422) =="
-HTTP=$(curl -sS -o /dev/null -w '%{http_code}' \
+HTTP=$(curl -sS -o /dev/null -b "$CJ" -w '%{http_code}' \
   -X POST "$API/v1/centros-custo/import/commit" \
   -H 'Content-Type: application/json' -d "$CSV_BAD_JSON")
 [[ "$HTTP" == "422" ]] \
@@ -76,6 +106,21 @@ ORFAO_COUNT=$(docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tA
   -c "SELECT COUNT(*) FROM centros_custo WHERE codigo = 'ORFAO';")
 [[ "$ORFAO_COUNT" == "0" ]] \
   && ok "registro inválido NÃO foi persistido" || fail "ORFAO no banco! ($ORFAO_COUNT)"
+
+bold "== 7. Auditoria do commit =="
+AUDIT_COUNT=$(docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tA \
+  -c "SELECT COUNT(*) FROM auditoria WHERE usuario = '$EMAIL' \
+      AND acao = 'centros_custo_import_commit';")
+[[ "$AUDIT_COUNT" -ge "2" ]] \
+  && ok "$AUDIT_COUNT eventos de auditoria registrados" \
+  || fail "auditoria do commit ausente: $AUDIT_COUNT"
+
+bold "== Limpeza =="
+docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -c \
+  "DELETE FROM sessao_admin WHERE operador_id IN (SELECT id FROM operadores WHERE email = '$EMAIL'); \
+   DELETE FROM operadores WHERE email = '$EMAIL'; \
+   DELETE FROM auditoria WHERE usuario = '$EMAIL';" >/dev/null
+ok "dados de smoke removidos"
 
 bold "== Resumo =="
 if [[ $FALHAS -eq 0 ]]; then

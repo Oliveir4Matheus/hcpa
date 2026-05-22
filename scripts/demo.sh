@@ -56,7 +56,18 @@ dim "Esperado: 10 tabelas + alembic_version."
 # --------------------------------------------------------------------
 title "Passo 4 — API de import de centros de custo (2 fases)"
 
-bold "4a) Preview com payload válido (raiz + 2 filhos)"
+bold "4a) Bootstrap do operador + login (cookie em /tmp/cj.txt)"
+DEMO_EMAIL="${DEMO_EMAIL:-demo-admin@example.com}"
+DEMO_SENHA="${DEMO_SENHA:-senha-demo-12345}"
+CJ_DEMO=/tmp/cj.txt
+run "docker compose exec -T api python -m scripts.create_operador \
+  --email '$DEMO_EMAIL' --senha '$DEMO_SENHA' --nome Demo --sobrenome Admin 2>&1 || true"
+run "curl -sS -c '$CJ_DEMO' -X POST $API_BASE/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{\"email\":\"$DEMO_EMAIL\",\"senha\":\"$DEMO_SENHA\"}' | jq ."
+dim "A partir daqui, os endpoints de import exigem o cookie de sessão."
+
+bold "4b) Preview com payload válido (raiz + 2 filhos)"
 cat <<'JSON' > /tmp/cc_preview_ok.json
 {
   "itens": [
@@ -66,12 +77,12 @@ cat <<'JSON' > /tmp/cc_preview_ok.json
   ]
 }
 JSON
-run "curl -sS -X POST $API_BASE/v1/centros-custo/import/preview \
+run "curl -sS -b '$CJ_DEMO' -X POST $API_BASE/v1/centros-custo/import/preview \
   -H 'Content-Type: application/json' \
   -d @/tmp/cc_preview_ok.json | jq ."
 dim "Esperado: valido=true, novos=[ROOT, ADM, ENF-3A], erros=[]."
 
-bold "4b) Preview com payload inválido (codigo_pai inexistente)"
+bold "4c) Preview com payload inválido (codigo_pai inexistente)"
 cat <<'JSON' > /tmp/cc_preview_bad.json
 {
   "itens": [
@@ -79,24 +90,24 @@ cat <<'JSON' > /tmp/cc_preview_bad.json
   ]
 }
 JSON
-run "curl -sS -X POST $API_BASE/v1/centros-custo/import/preview \
+run "curl -sS -b '$CJ_DEMO' -X POST $API_BASE/v1/centros-custo/import/preview \
   -H 'Content-Type: application/json' \
   -d @/tmp/cc_preview_bad.json | jq ."
 dim "Esperado: valido=false, erros[].erro mencionando codigo_pai."
 
-bold "4c) Commit do payload válido (persiste no PG)"
-run "curl -sS -X POST $API_BASE/v1/centros-custo/import/commit \
+bold "4d) Commit do payload válido (persiste no PG)"
+run "curl -sS -b '$CJ_DEMO' -X POST $API_BASE/v1/centros-custo/import/commit \
   -H 'Content-Type: application/json' \
   -d @/tmp/cc_preview_ok.json | jq ."
 dim "Esperado: criados=3, atualizados=0."
 
-bold "4d) Re-commit do MESMO payload (upsert idempotente)"
-run "curl -sS -X POST $API_BASE/v1/centros-custo/import/commit \
+bold "4e) Re-commit do MESMO payload (upsert idempotente)"
+run "curl -sS -b '$CJ_DEMO' -X POST $API_BASE/v1/centros-custo/import/commit \
   -H 'Content-Type: application/json' \
   -d @/tmp/cc_preview_ok.json | jq ."
 dim "Esperado: criados=0, atualizados=3."
 
-bold "4e) Confirmar no banco"
+bold "4f) Confirmar no banco"
 run "docker compose exec -T postgres psql -U $PG_USER -d $PG_DB -c \"
   SELECT cc.codigo,
          cc.nome,

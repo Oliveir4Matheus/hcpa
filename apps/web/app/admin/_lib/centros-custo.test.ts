@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
+  CentrosCustoError,
   parseCsvCentrosCusto,
   postPreview,
   postCommit,
@@ -169,7 +170,7 @@ describe("postPreview / postCommit (com fetch mockado)", () => {
     total_colaboradores: 0,
   };
 
-  it("postPreview envia POST com JSON no body", async () => {
+  it("postPreview chama proxy /api/v1/centros-custo/import/preview com same-origin", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -187,14 +188,24 @@ describe("postPreview / postCommit (com fetch mockado)", () => {
     expect(r.valido).toBe(true);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/\/v1\/centros-custo\/import\/preview$/);
+    expect(String(url)).toBe("/api/v1/centros-custo/import/preview");
     expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("same-origin");
     expect(JSON.parse(init.body)).toEqual({ itens: [item] });
+  });
+
+  it("postPreview em 401 lança CentrosCustoError com code nao_autenticado", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    const erro = await postPreview([item]).catch((e: unknown) => e);
+    expect(erro).toBeInstanceOf(CentrosCustoError);
+    expect((erro as CentrosCustoError).code).toBe("nao_autenticado");
   });
 
   it("postPreview lança erro em HTTP não-2xx", async () => {
     fetchMock.mockResolvedValueOnce(new Response("oops", { status: 500 }));
-    await expect(postPreview([item])).rejects.toThrow(/HTTP 500/);
+    const erro = await postPreview([item]).catch((e: unknown) => e);
+    expect(erro).toBeInstanceOf(CentrosCustoError);
+    expect((erro as CentrosCustoError).message).toMatch(/HTTP 500/);
   });
 
   it("postCommit serializa resposta de sucesso", async () => {
@@ -205,9 +216,20 @@ describe("postPreview / postCommit (com fetch mockado)", () => {
     );
     const r = await postCommit([item]);
     expect(r).toEqual({ criados: 1, atualizados: 0 });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("/api/v1/centros-custo/import/commit");
+    expect(init.credentials).toBe("same-origin");
   });
 
-  it("postCommit propaga status e detalhe do 422 do backend", async () => {
+  it("postCommit em 401 lança nao_autenticado", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    const erro = await postCommit([item]).catch((e: unknown) => e);
+    expect(erro).toBeInstanceOf(CentrosCustoError);
+    expect((erro as CentrosCustoError).code).toBe("nao_autenticado");
+  });
+
+  it("postCommit propaga code payload_invalido para detail.erros do 422", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -216,8 +238,9 @@ describe("postPreview / postCommit (com fetch mockado)", () => {
         { status: 422 },
       ),
     );
-    await expect(postCommit([item])).rejects.toThrow(
-      /HTTP 422.*(ORFAO|pai inexistente)/,
-    );
+    const erro = await postCommit([item]).catch((e: unknown) => e);
+    expect(erro).toBeInstanceOf(CentrosCustoError);
+    expect((erro as CentrosCustoError).code).toBe("payload_invalido");
+    expect((erro as CentrosCustoError).message).toMatch(/ORFAO.*pai inexistente/);
   });
 });
