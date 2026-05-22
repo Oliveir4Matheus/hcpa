@@ -38,6 +38,21 @@ export class LoginError extends Error {
   }
 }
 
+async function lerErroOuFalhar(res: Response): Promise<never> {
+  let code = "erro_desconhecido";
+  let mensagem = `HTTP ${res.status}`;
+  try {
+    const body = (await res.json()) as {
+      detail?: { code?: string; mensagem?: string };
+    };
+    if (body.detail?.code) code = body.detail.code;
+    if (body.detail?.mensagem) mensagem = body.detail.mensagem;
+  } catch {
+    // resposta não é JSON — mantém mensagem default
+  }
+  throw new LoginError(code, mensagem);
+}
+
 export async function postLogin(
   email: string,
   senha: string,
@@ -48,19 +63,19 @@ export async function postLogin(
     credentials: "same-origin",
     body: JSON.stringify({ email, senha }),
   });
-  if (!res.ok) {
-    let code = "erro_desconhecido";
-    let mensagem = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as {
-        detail?: { code?: string; mensagem?: string };
-      };
-      if (body.detail?.code) code = body.detail.code;
-      if (body.detail?.mensagem) mensagem = body.detail.mensagem;
-    } catch {
-      // resposta não é JSON — mantém mensagem default
-    }
-    throw new LoginError(code, mensagem);
-  }
+  if (!res.ok) await lerErroOuFalhar(res);
   return (await res.json()) as LoginResposta;
+}
+
+export async function postTotpVerify(
+  codigo: string,
+): Promise<LoginRespostaCompleta> {
+  const res = await fetch("/api/v1/auth/totp/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ codigo }),
+  });
+  if (!res.ok) await lerErroOuFalhar(res);
+  return (await res.json()) as LoginRespostaCompleta;
 }

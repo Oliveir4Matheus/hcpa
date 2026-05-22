@@ -7,7 +7,6 @@ import { LoginError, postLogin } from "../_lib/auth-api";
 type Estado =
   | { tipo: "idle" }
   | { tipo: "enviando" }
-  | { tipo: "totp_pendente"; email: string }
   | { tipo: "erro"; mensagem: string };
 
 export function LoginForm() {
@@ -22,7 +21,7 @@ export function LoginForm() {
     try {
       const r = await postLogin(email, senha);
       if (r.totp_required) {
-        setEstado({ tipo: "totp_pendente", email: r.email });
+        router.push(`/login/totp?email=${encodeURIComponent(r.email)}`);
         return;
       }
       router.push("/painel");
@@ -79,16 +78,6 @@ export function LoginForm() {
         {enviando ? "Entrando…" : "Entrar"}
       </button>
 
-      {estado.tipo === "totp_pendente" && (
-        <p
-          role="status"
-          className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200"
-        >
-          Operador <span className="font-mono">{estado.email}</span> exige TOTP.
-          A verificação TOTP pelo painel ainda não está implementada —
-          desabilite o TOTP do seu operador com o admin para entrar por aqui.
-        </p>
-      )}
       {estado.tipo === "erro" && (
         <p
           role="alert"

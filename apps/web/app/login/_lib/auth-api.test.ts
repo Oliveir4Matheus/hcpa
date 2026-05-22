@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LoginError, postLogin } from "./auth-api";
+import { LoginError, postLogin, postTotpVerify } from "./auth-api";
 
 describe("postLogin", () => {
   const fetchMock = vi.fn();
@@ -80,5 +80,62 @@ describe("postLogin", () => {
     expect(erro).toBeInstanceOf(LoginError);
     expect((erro as LoginError).code).toBe("erro_desconhecido");
     expect((erro as LoginError).message).toBe("HTTP 500");
+  });
+});
+
+describe("postTotpVerify", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("envia POST para /api/v1/auth/totp/verify com o código", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          totp_required: false,
+          operador: {
+            id: "00000000-0000-0000-0000-000000000001",
+            email: "totp@example.com",
+            nome: null,
+            sobrenome: null,
+            totp_enabled: true,
+            ativo: true,
+            criado_em: "2026-05-19T00:00:00Z",
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const r = await postTotpVerify("123456");
+    expect(r.operador.email).toBe("totp@example.com");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("/api/v1/auth/totp/verify");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("same-origin");
+    expect(JSON.parse(init.body)).toEqual({ codigo: "123456" });
+  });
+
+  it("lança LoginError com code totp_invalido em 401", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          detail: { code: "totp_invalido", mensagem: "Código TOTP inválido." },
+        }),
+        { status: 401 },
+      ),
+    );
+    await expect(postTotpVerify("000000")).rejects.toMatchObject({
+      name: "LoginError",
+      code: "totp_invalido",
+    });
   });
 });

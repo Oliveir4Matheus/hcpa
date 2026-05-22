@@ -51,7 +51,7 @@ describe("<LoginForm />", () => {
     expect(pushMock).toHaveBeenCalledWith("/painel");
   });
 
-  it("quando o backend pede TOTP, mostra mensagem informativa e não navega", async () => {
+  it("quando o backend pede TOTP, redireciona para /login/totp com email", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ totp_required: true, email: "totp@example.com" }),
@@ -65,9 +65,9 @@ describe("<LoginForm />", () => {
     await user.type(screen.getByLabelText(/senha/i), "qualquer");
     await user.click(screen.getByRole("button", { name: /entrar/i }));
 
-    expect(pushMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent(/totp@example.com/);
-    expect(screen.getByRole("status")).toHaveTextContent(/TOTP/);
+    expect(pushMock).toHaveBeenCalledWith(
+      "/login/totp?email=totp%40example.com",
+    );
   });
 
   it("em 401 com code credenciais_invalidas, mostra mensagem de erro", async () => {
