@@ -22,7 +22,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # NOTA: init.sql não é montado em prod — no Coolify o bind apontaria para
+    # path inexistente e o Docker o criaria como diretório vazio (quebra o
+    # entrypoint do postgres). As extensões PG (pgcrypto/uuid-ossp/citext)
+    # são criadas na primeira migration Alembic (idempotente).
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
