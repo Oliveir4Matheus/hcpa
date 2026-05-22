@@ -77,7 +77,6 @@ describe("<PainelAgregado />", () => {
     expect(
       screen.getByText(/Agregação por centro de custo/i),
     ).toBeInTheDocument();
-    // rótulo bonito: codigo+nome do CC (não o UUID que vem em bucket.valor)
     expect(screen.getByText("ENF-3A · Enfermaria 3A")).toBeInTheDocument();
 
     const [url] = fetchMock.mock.calls[0];

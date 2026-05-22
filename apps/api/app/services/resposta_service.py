@@ -130,7 +130,7 @@ async def agregar_respostas_por_cc(
         raise RespostaError("centro_custo_invalido", "Centro de custo não encontrado.")
 
     if cc.total_colaboradores >= K_ANONIMATO_MIN:
-        bucket = AgregadoBucket(tipo="centro_custo", valor=str(cc.id))
+        bucket = AgregadoBucket(tipo="centro_custo", valor=cc.codigo)
         bucket_filtro = Questionario.centro_custo_id == cc.id
     else:
         if not cc.bloco_predio:

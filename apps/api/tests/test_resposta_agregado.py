@@ -101,7 +101,7 @@ async def test_agregado_cc_grande_retorna_por_dominio(
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["bucket"] == {"tipo": "centro_custo", "valor": str(cc.id)}
+    assert body["bucket"] == {"tipo": "centro_custo", "valor": cc.codigo}
     assert body["n_questionarios"] == K_ANONIMATO_MIN
     assert body["supressao"] is None
     nomes = {d["dominio_nome"]: d for d in body["por_dominio"]}
